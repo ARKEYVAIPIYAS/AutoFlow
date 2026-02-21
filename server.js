@@ -11,20 +11,25 @@ const cron = require('node-cron');
 const Workflow = require('./models/Workflow');
 
 const app = express();
-app.use(cors());
+app.use(cors()); 
 app.use(express.json());
 
 // --- DATABASE CONNECTION ---
 mongoose.connect('mongodb://127.0.0.1:27017/aautoflow')
-    .then(() => console.log("\x1b[32m[DB]\x1b[0m Connected to MongoDB"))
-    .catch(err => console.error("Could not connect to MongoDB", err));
+    .then(() => console.log("\x1b[32m[DB]\x1b[0m Connected to MongoDB successfully"))
+    .catch(err => console.error("\x1b[31m[DB Error]\x1b[0m Connection failed:", err));
 
-const activeJobs = {};
+// --- GLOBAL TRACKER FOR ACTIVE POLLING ---
+const activeTasks = {}; // Store cron jobs to stop them later
 
 // --- THE RECURSIVE ENGINE ---
-async function runEngine(workflow, initialData) {
+async function runEngine(workflow, initialData, mode = "Manual") {
     let context = { ...initialData, aiResponse: "", externalData: "" };
     const visited = new Set();
+
+    const modeColors = { "Polling": "\x1b[36m", "RunOnce": "\x1b[33m", "Trigger": "\x1b[35m" };
+    const color = modeColors[mode] || "\x1b[37m";
+    console.log(`${color}[${mode.toUpperCase()}] >> Launching: ${workflow.name}\x1b[0m`);
 
     async function executeNode(nodeId) {
         if (visited.has(nodeId)) return;
@@ -32,95 +37,79 @@ async function runEngine(workflow, initialData) {
         if (!currentNode || !currentNode.data) return;
         visited.add(nodeId);
 
-        console.log(`\x1b[33m[Executing]\x1b[0m ${currentNode.data.label}`);
+        console.log(`\x1b[90m[Node]\x1b[0m ${currentNode.data.label}`);
 
         try {
-            // 1. UNIVERSAL DYNAMIC HTTP NODE
-            if (currentNode.data.label.includes('HTTP')) {
-                try {
-                    const url = currentNode.data.url;
-                    const userApiKey = currentNode.data.apiKey; 
-                    let headers = { "Accept": "application/json" };
-
-                    if (userApiKey) {
-                        headers['x-cg-demo-api-key'] = userApiKey; // For CoinGecko
-                        headers['Authorization'] = `Bearer ${userApiKey}`; // For OpenAI
-                        headers['x-api-key'] = userApiKey; // Generic
-                    }
-
-                    const response = await axios.get(url, {
-                        timeout: 10000,
-                        headers: headers
-                    });
-
-                    context.externalData = JSON.stringify(response.data, null, 2);
-                    console.log("\x1b[32m>> Data Fetched Successfully!\x1b[0m");
-                } catch (err) {
-                    console.error(`\x1b[31m[HTTP Error]\x1b[0m: ${err.message}`);
-                    context.externalData = "Error: Check your URL or API Key.";
+            // 1. GOOGLE FORM / TRIGGER NODE
+            if (currentNode.data.label.includes('Google Form') || currentNode.data.label.includes('Trigger')) {
+                const targetEmail = currentNode.data.targetUserEmail; 
+                if (targetEmail && context.email && context.email !== targetEmail) {
+                    console.log(`\x1b[31m[GATEKEEPER]\x1b[0m Mismatch: Skipping order for ${context.email}\x1b[0m`);
+                    return; 
                 }
+                console.log("\x1b[32m  └─ Verified: Proceeding with Automation\x1b[0m");
             }
 
-            // 2. AI NODE (With Rate Limit Protection)
+            // 2. AI NODE (Gemini 2.5 Flash)
             if (currentNode.data.label.includes('AI')) {
-                if (!context.externalData) return;
+                console.log("\x1b[36m  └─ Delay: 5s Cool-down for Gemini API...\x1b[0m");
+                await new Promise(r => setTimeout(r, 5000)); 
 
-                // Wait 5 seconds to prevent 429 Rate Limit errors
-                console.log("\x1b[36m[System]\x1b[0m Waiting for API cool-down...");
-                await new Promise(r => setTimeout(r, 5000));
-
-                try {
-                    const apiURL = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_KEY}`;
-                    const prompt = currentNode.data.instruction || "Analyze this:";
-                    const finalPrompt = prompt.replace('{{externalData}}', context.externalData);
-
-                    const response = await axios.post(apiURL, {
-                        contents: [{ parts: [{ text: finalPrompt }] }]
-                    });
-                    context.aiResponse = response.data.candidates[0].content.parts[0].text;
-                    console.log("\x1b[32m>> AI Analysis Success!\x1b[0m");
-                } catch (err) {
-                    if (err.response && err.response.status === 429) {
-                        console.error("\x1b[31m[AI Error]\x1b[0m: Still Rate Limited. Wait 2-3 minutes.");
-                    } else {
-                        console.error(`\x1b[31m[AI Error]\x1b[0m: ${err.message}`);
-                    }
-                }
+                const apiURL = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_KEY}`;
+                let prompt = currentNode.data.instruction || "Context:";
+                
+                if (context.name) prompt = prompt.replace('{{name}}', context.name);
+                if (context.email) prompt = prompt.replace('{{email}}', context.email);
+                
+                const response = await axios.post(apiURL, {
+                    contents: [{ parts: [{ text: prompt }] }]
+                });
+                context.aiResponse = response.data.candidates[0].content.parts[0].text;
+                console.log("\x1b[32m  └─ AI: Insight Generated Successfully\x1b[0m");
             }
 
-            // 3. WHATSAPP (With Phone Sanitizer)
-            if (currentNode.data.label.includes('WhatsApp')) {
-                if (!context.aiResponse) return;
+            // 3. WHATSAPP NODE (Twilio)
+            if (currentNode.data.label.includes('WhatsApp') && context.aiResponse) {
                 const client = twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
-                
-                // Clean the phone number of any brackets or symbols
-                const cleanPhone = currentNode.data.toPhone.replace(/[^\d+]/g, ''); 
-
+                const recipient = (context.phone || currentNode.data.toPhone).replace(/[^\d+]/g, ''); 
                 await client.messages.create({
                     from: `whatsapp:${process.env.TWILIO_PHONE}`,
-                    to: `whatsapp:${cleanPhone}`,
-                    body: context.aiResponse.substring(0, 1550)
+                    to: `whatsapp:${recipient}`,
+                    body: context.aiResponse.substring(0, 1500)
                 });
-                console.log("\x1b[32m>> WhatsApp Sent Successfully!\x1b[0m");
+                console.log(`\x1b[32m  └─ WhatsApp: Sent to ${recipient}\x1b[0m`);
             }
 
-            // 4. GMAIL
-            if (currentNode.data.label.includes('Gmail')) {
-                if (!context.aiResponse) return;
+            // 4. GMAIL NODE (Nodemailer)
+            if (currentNode.data.label.includes('Gmail') && context.aiResponse) {
                 const transporter = nodemailer.createTransport({
                     service: 'gmail',
                     auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_PASS }
                 });
+                const recipient = context.email || currentNode.data.toEmail;
                 await transporter.sendMail({
-                    from: `"AutoFlow" <${process.env.GMAIL_USER}>`,
-                    to: currentNode.data.toEmail,
-                    subject: "Workflow Update",
+                    from: `"AutoFlow Studio" <${process.env.GMAIL_USER}>`,
+                    to: recipient,
+                    subject: "Order Confirmation",
                     text: context.aiResponse
                 });
-                console.log("\x1b[32m>> Gmail Sent Successfully!\x1b[0m");
+                console.log(`\x1b[32m  └─ Gmail: Sent to ${recipient}\x1b[0m`);
+            }
+
+            // 5. HTTP / WEBHOOK NODE
+            if (currentNode.data.label.includes('HTTP')) {
+                const targetUrl = currentNode.data.url;
+                if (targetUrl) {
+                    await axios.post(targetUrl, {
+                        customer: context.name,
+                        message: context.aiResponse,
+                        source: "AutoFlow_Engine_v2.5"
+                    });
+                    console.log(`\x1b[32m  └─ HTTP: Webhook fired to ${targetUrl}\x1b[0m`);
+                }
             }
         } catch (error) {
-            console.error(`\x1b[31m[Error]\x1b[0m at ${currentNode.data.label}:`, error.message);
+            console.error(`\x1b[31m  └─ Error at ${currentNode.data.label}:\x1b[0m`, error.message);
         }
 
         const outgoingEdges = workflow.edges.filter(e => e.source === nodeId);
@@ -133,39 +122,82 @@ async function runEngine(workflow, initialData) {
 
 // --- API ROUTES ---
 
-// Save workflow
+// 1. WORKFLOW SAVING ROUTE
 app.post('/api/workflows', async (req, res) => {
-    const workflow = new Workflow(req.body);
-    await workflow.save();
-    res.status(201).send(workflow);
-});
-
-// MANUAL RUN (RUN ONCE)
-app.post('/api/workflows/:id/run', async (req, res) => {
-    const workflow = await Workflow.findById(req.params.id);
-    console.log(`\x1b[35m[Manual Run]\x1b[0m Starting single execution for: ${workflow.name}`);
-    runEngine(workflow, {}); 
-    res.send({ status: "Processing" });
-});
-
-// ACTIVATE POLLING (LIVE MODE)
-app.post('/api/workflows/:id/activate', async (req, res) => {
-    const workflow = await Workflow.findById(req.params.id);
-    if (activeJobs[req.params.id]) activeJobs[req.params.id].stop();
-    activeJobs[req.params.id] = cron.schedule('*/1 * * * *', () => {
-        console.log(`\x1b[36m[Cron Job]\x1b[0m Running scheduled workflow: ${workflow.name}`);
-        runEngine(workflow, {});
-    });
-    res.send({ status: "Active" });
-});
-
-// DEACTIVATE POLLING
-app.post('/api/workflows/:id/deactivate', (req, res) => {
-    if (activeJobs[req.params.id]) {
-        activeJobs[req.params.id].stop();
-        delete activeJobs[req.params.id];
+    try {
+        const { name, nodes, edges } = req.body;
+        const newWorkflow = new Workflow({ name, nodes, edges });
+        await newWorkflow.save();
+        console.log(`\x1b[35m[SAVE]\x1b[0m Workflow Saved: ${newWorkflow._id}`);
+        res.status(201).json(newWorkflow);
+    } catch (err) {
+        res.status(500).json({ error: "Failed to save workflow" });
     }
-    res.send({ status: "Inactive" });
 });
 
-app.listen(3000, () => console.log("[Server] Running on http://localhost:3000"));
+// 2. RUN ONCE (The "RUN ONCE" Button)
+app.post('/api/workflows/:id/run', async (req, res) => {
+    try {
+        const workflow = await Workflow.findById(req.params.id);
+        if (!workflow) return res.status(404).send("Workflow not found");
+        runEngine(workflow, { name: "Manual Run", email: "manual@test.com" }, "RunOnce");
+        res.status(200).json({ status: "Run triggered" });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 3. ACTIVATE POLLING (The "GO LIVE" Button)
+app.post('/api/workflows/:id/activate', async (req, res) => {
+    try {
+        const { id } = req.params;
+        const workflow = await Workflow.findById(id);
+        if (!workflow) return res.status(404).send("Workflow not found");
+
+        if (activeTasks[id]) activeTasks[id].stop();
+
+        activeTasks[id] = cron.schedule('* * * * *', () => {
+            console.log(`\x1b[36m[POLLING]\x1b[0m Pulse check for: ${workflow.name}`);
+            runEngine(workflow, { name: "AutoFlow System" }, "Polling");
+        });
+
+        console.log(`\x1b[32m[LIVE]\x1b[0m Automation activated for ${id}`);
+        res.status(200).json({ status: "Activated" });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// 4. DEACTIVATE (The "STOP POLLING" Button)
+app.post('/api/workflows/:id/deactivate', async (req, res) => {
+    const { id } = req.params;
+    if (activeTasks[id]) {
+        activeTasks[id].stop();
+        delete activeTasks[id];
+        console.log(`\x1b[31m[STOP]\x1b[0m Polling stopped for ${id}`);
+        return res.status(200).json({ status: "Deactivated" });
+    }
+    res.status(400).send("No active task found");
+});
+
+// 5. GOOGLE FORM WEBHOOK
+app.post('/api/forms/bakery-order', async (req, res) => {
+    const { customerName, customerPhone, customerEmail, workflowId } = req.body;
+    console.log(`\x1b[35m[WEBHOOK]\x1b[0m Received: ${customerName} | ${customerEmail}`);
+    try {
+        const workflow = await Workflow.findById(workflowId);
+        if (!workflow) return res.status(404).json({ error: "Workflow ID not found" });
+        res.status(200).json({ status: "success" });
+        runEngine(workflow, { name: customerName, phone: customerPhone, email: customerEmail }, "Trigger");
+    } catch (err) {
+        if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+});
+
+// Catch-all Diagnostic
+app.use((req, res) => {
+    console.log(`\x1b[31m[404]\x1b[0m Invalid Path: ${req.method} ${req.originalUrl}`);
+    res.status(404).send("Route not found");
+});
+
+const PORT = 3000;
+app.listen(PORT, () => {
+    console.log(`\n\x1b[95m🚀 AutoFlow Engine v2.5 Online\x1b[0m`);
+    console.log(`Backend: http://localhost:${PORT} | DB: aautoflow\n`);
+});
