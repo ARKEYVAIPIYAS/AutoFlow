@@ -1,53 +1,58 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import { Activity, Plus, Power, LayoutGrid, Trash2, RefreshCw } from 'lucide-react';
+import { Activity, Plus, Power, LayoutGrid, Trash2, RefreshCw, AlertCircle } from 'lucide-react';
 
 // --- CONFIGURATION ---
-// Replace this with your actual Render URL
+// Centralized Cloud Endpoint
 const API_BASE_URL = "https://autoflow-caor.onrender.com/api";
 
 const Dashboard = () => {
   const [workflows, setWorkflows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const navigate = useNavigate();
 
-  // 1. Fetch Workflows
-  const fetchWorkflows = async () => {
-    setLoading(true);
+  // 1. Fetch Workflows (Wrapped in useCallback for stability)
+  const fetchWorkflows = useCallback(async (showSilence = false) => {
+    if (!showSilence) setLoading(true);
+    setError(null);
     try {
       const res = await axios.get(`${API_BASE_URL}/workflows`);
       setWorkflows(res.data);
-      setLoading(false);
     } catch (err) {
-      console.error("Fetch Error:", err);
+      console.error("Cloud Fetch Error:", err);
+      setError("Unable to reach Cloud Engine. Check your connection.");
+    } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchWorkflows();
   }, []);
 
-  // 2. Stop Workflow (Deactivate)
+  // 2. Real-Time Sync (Polls the cloud every 30 seconds)
+  useEffect(() => {
+    fetchWorkflows();
+    const interval = setInterval(() => fetchWorkflows(true), 30000); 
+    return () => clearInterval(interval);
+  }, [fetchWorkflows]);
+
+  // 3. Stop Workflow (Deactivate)
   const handleStop = async (id) => {
     try {
       await axios.post(`${API_BASE_URL}/workflows/${id}/deactivate`);
-      alert("🛑 Automation Stopped");
-      fetchWorkflows(); 
+      fetchWorkflows(true); // Silent refresh
     } catch (err) {
-      alert("Failed to stop workflow");
+      alert("Failed to halt cloud task.");
     }
   };
 
-  // 3. Delete Workflow
+  // 4. Delete Workflow
   const handleDelete = async (id) => {
-    if (window.confirm("Are you sure you want to delete this workflow?")) {
+    if (window.confirm("Permanent Action: Delete this workflow from the cloud?")) {
       try {
         await axios.delete(`${API_BASE_URL}/workflows/${id}`);
-        setWorkflows(workflows.filter(w => w._id !== id));
+        setWorkflows(prev => prev.filter(w => w._id !== id));
       } catch (err) {
-        alert("Delete failed");
+        alert("Delete failed. Cloud resource may be busy.");
       }
     }
   };
@@ -56,11 +61,19 @@ const Dashboard = () => {
     <div style={containerStyle}>
       <header style={headerStyle}>
         <div>
-          <h1 style={{ fontSize: '24px', margin: 0 }}>AutoFlow <span style={{color: '#38BDF8'}}>CLOUD</span></h1>
-          <p style={{ color: '#64748B', fontSize: '14px' }}>Welcome back, Rony. Manage your platform.</p>
+          <h1 style={{ fontSize: '26px', margin: 0, letterSpacing: '-1px' }}>
+            AutoFlow <span style={{color: '#38BDF8', fontWeight: '800'}}>PRO</span>
+          </h1>
+          <p style={{ color: '#94A3B8', fontSize: '14px', marginTop: '4px' }}>
+            {workflows.length} active automations on MongoDB Atlas
+          </p>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
-          <button onClick={fetchWorkflows} style={refreshBtnStyle}>
+          <button 
+            onClick={() => fetchWorkflows()} 
+            style={refreshBtnStyle}
+            title="Force Cloud Sync"
+          >
             <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
           </button>
           <button onClick={() => navigate('/studio/new')} style={createBtnStyle}>
@@ -69,54 +82,80 @@ const Dashboard = () => {
         </div>
       </header>
 
+      {/* ERROR STATE */}
+      {error && (
+        <div style={errorBanner}>
+          <AlertCircle size={18} /> {error}
+        </div>
+      )}
+
       <div style={statsRowStyle}>
-        <div style={statBox}><span>Total Flows</span> <strong>{workflows.length}</strong></div>
-        <div style={statBox}><span>Live Now</span> <strong style={{color: '#34D399'}}>{loading ? '...' : workflows.length}</strong></div>
+        <div style={statBox}>
+          <span style={statLabel}>CLOUD REPOSITORY</span> 
+          <strong style={statValue}>{workflows.length}</strong>
+        </div>
+        <div style={statBox}>
+          <span style={statLabel}>ENGINE STATUS</span> 
+          <strong style={{...statValue, color: '#34D399'}}>
+            {loading ? 'SYNCING...' : 'ONLINE'}
+          </strong>
+        </div>
       </div>
 
       <div style={gridStyle}>
         {workflows.map((flow) => (
           <div key={flow._id} style={cardStyle}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
-              <LayoutGrid size={20} color="#38BDF8" />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <div style={iconBox}><LayoutGrid size={20} color="#38BDF8" /></div>
               <div style={statusTag}><Activity size={10} /> LIVE</div>
             </div>
-            <h3 style={{ margin: '0 0 10px 0' }}>{flow.name || "Untitled Flow"}</h3>
-            <p style={{ fontSize: '11px', color: '#64748B', marginBottom: '15px' }}>ID: {flow._id.substring(0, 8)}...</p>
+            <h3 style={cardTitle}>{flow.name || "Unnamed Automation"}</h3>
+            <p style={cardId}>Deployment ID: {flow._id.substring(0, 12)}</p>
             
             <div style={cardActions}>
               <div style={{ display: 'flex', gap: '15px' }}>
                 <button onClick={() => navigate(`/studio/${flow._id}`)} style={editBtn}>OPEN STUDIO</button>
-                <button onClick={() => handleDelete(flow._id)} style={deleteBtn}><Trash2 size={14}/></button>
+                <button onClick={() => handleDelete(flow._id)} style={deleteBtn}><Trash2 size={16}/></button>
               </div>
-              <button onClick={() => handleStop(flow._id)} style={stopBtn}><Power size={14} /> STOP LIVE</button>
+              <button onClick={() => handleStop(flow._id)} style={stopBtn}>
+                <Power size={14} /> STOP
+              </button>
             </div>
           </div>
         ))}
       </div>
+
       {workflows.length === 0 && !loading && (
-        <div style={{textAlign: 'center', marginTop: '50px'}}>
-           <p style={{color: '#64748B'}}>No workflows found in the cloud database.</p>
-           <button onClick={() => navigate('/studio/new')} style={{color: '#38BDF8', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline'}}>Create your first one</button>
+        <div style={emptyState}>
+           <p>Your cloud database is currently empty.</p>
+           <button onClick={() => navigate('/studio/new')} style={emptyBtn}>Launch your first automation</button>
         </div>
       )}
     </div>
   );
 };
 
-// --- Styles ---
-const containerStyle = { padding: '40px', background: '#061E29', minHeight: '100vh', color: 'white', fontFamily: 'Inter, sans-serif' };
-const headerStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
-const createBtnStyle = { background: '#0EA5E9', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' };
-const refreshBtnStyle = { background: '#1E293B', color: 'white', border: '1px solid #334155', padding: '12px', borderRadius: '8px', cursor: 'pointer' };
-const gridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '25px' };
-const cardStyle = { background: '#0B2E3C', padding: '25px', borderRadius: '15px', border: '1px solid #1E293B', transition: '0.3s' };
-const statusTag = { background: '#064E3B', color: '#34D399', padding: '4px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' };
-const statsRowStyle = { display: 'flex', gap: '20px', marginBottom: '30px' };
-const statBox = { background: '#020617', padding: '15px 25px', borderRadius: '10px', border: '1px solid #1E293B', display: 'flex', flexDirection: 'column', minWidth: '150px' };
-const cardActions = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #1E293B', paddingTop: '15px', marginTop: '15px' };
-const editBtn = { background: 'none', border: 'none', color: '#38BDF8', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' };
-const deleteBtn = { background: 'none', border: 'none', color: '#64748B', cursor: 'pointer' };
-const stopBtn = { background: 'none', border: 'none', color: '#F87171', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '5px' };
+// --- Professional SaaS UI Styles ---
+const containerStyle = { padding: '50px 80px', background: '#020617', minHeight: '100vh', color: 'white', fontFamily: 'Inter, sans-serif' };
+const headerStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '50px' };
+const createBtnStyle = { background: '#0EA5E9', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '10px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 14px 0 rgba(14, 165, 233, 0.39)' };
+const refreshBtnStyle = { background: '#1E293B', color: '#94A3B8', border: '1px solid #334155', padding: '12px', borderRadius: '10px', cursor: 'pointer', transition: '0.2s' };
+const gridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '30px' };
+const cardStyle = { background: '#0F172A', padding: '30px', borderRadius: '20px', border: '1px solid #1E293B', position: 'relative', overflow: 'hidden' };
+const iconBox = { background: 'rgba(56, 189, 248, 0.1)', padding: '10px', borderRadius: '12px' };
+const statusTag = { background: 'rgba(52, 211, 153, 0.1)', color: '#34D399', padding: '6px 12px', borderRadius: '30px', fontSize: '11px', fontWeight: '800', display: 'flex', alignItems: 'center', gap: '6px', border: '1px solid rgba(52, 211, 153, 0.2)' };
+const cardTitle = { fontSize: '18px', fontWeight: '700', margin: '0 0 8px 0', color: '#F1F5F9' };
+const cardId = { fontSize: '12px', color: '#64748B', fontFamily: 'monospace', marginBottom: '20px' };
+const statsRowStyle = { display: 'flex', gap: '20px', marginBottom: '40px' };
+const statBox = { background: '#0F172A', padding: '20px 30px', borderRadius: '16px', border: '1px solid #1E293B', flex: 1 };
+const statLabel = { color: '#64748B', fontSize: '11px', fontWeight: '800', letterSpacing: '1px', display: 'block', marginBottom: '5px' };
+const statValue = { fontSize: '28px', fontWeight: '800' };
+const cardActions = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #1E293B', paddingTop: '20px', marginTop: '10px' };
+const editBtn = { background: 'none', border: 'none', color: '#38BDF8', cursor: 'pointer', fontSize: '13px', fontWeight: '700' };
+const deleteBtn = { background: 'none', border: 'none', color: '#475569', cursor: 'pointer', transition: '0.2s' };
+const stopBtn = { background: 'rgba(248, 113, 113, 0.1)', border: '1px solid rgba(248, 113, 113, 0.2)', color: '#F87171', cursor: 'pointer', fontSize: '12px', padding: '6px 12px', borderRadius: '8px', fontWeight: '700', display: 'flex', alignItems: 'center', gap: '6px' };
+const errorBanner = { background: '#450a0a', border: '1px solid #991b1b', color: '#f87171', padding: '12px 20px', borderRadius: '10px', marginBottom: '25px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px' };
+const emptyState = { textAlign: 'center', padding: '100px 0', color: '#64748B' };
+const emptyBtn = { color: '#38BDF8', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', fontSize: '16px', fontWeight: '600' };
 
 export default Dashboard;
