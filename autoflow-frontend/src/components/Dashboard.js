@@ -3,6 +3,10 @@ import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { Activity, Plus, Power, LayoutGrid, Trash2, RefreshCw } from 'lucide-react';
 
+// --- CONFIGURATION ---
+// Replace this with your actual Render URL
+const API_BASE_URL = "https://autoflow-caor.onrender.com/api";
+
 const Dashboard = () => {
   const [workflows, setWorkflows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -10,8 +14,9 @@ const Dashboard = () => {
 
   // 1. Fetch Workflows
   const fetchWorkflows = async () => {
+    setLoading(true);
     try {
-      const res = await axios.get('http://localhost:3000/api/workflows');
+      const res = await axios.get(`${API_BASE_URL}/workflows`);
       setWorkflows(res.data);
       setLoading(false);
     } catch (err) {
@@ -27,9 +32,9 @@ const Dashboard = () => {
   // 2. Stop Workflow (Deactivate)
   const handleStop = async (id) => {
     try {
-      await axios.post(`http://localhost:3000/api/workflows/${id}/deactivate`);
+      await axios.post(`${API_BASE_URL}/workflows/${id}/deactivate`);
       alert("🛑 Automation Stopped");
-      fetchWorkflows(); // Refresh list
+      fetchWorkflows(); 
     } catch (err) {
       alert("Failed to stop workflow");
     }
@@ -39,7 +44,7 @@ const Dashboard = () => {
   const handleDelete = async (id) => {
     if (window.confirm("Are you sure you want to delete this workflow?")) {
       try {
-        await axios.delete(`http://localhost:3000/api/workflows/${id}`);
+        await axios.delete(`${API_BASE_URL}/workflows/${id}`);
         setWorkflows(workflows.filter(w => w._id !== id));
       } catch (err) {
         alert("Delete failed");
@@ -55,7 +60,9 @@ const Dashboard = () => {
           <p style={{ color: '#64748B', fontSize: '14px' }}>Welcome back, Rony. Manage your platform.</p>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
-          <button onClick={fetchWorkflows} style={refreshBtnStyle}><RefreshCw size={18} /></button>
+          <button onClick={fetchWorkflows} style={refreshBtnStyle}>
+            <RefreshCw size={18} className={loading ? "animate-spin" : ""} />
+          </button>
           <button onClick={() => navigate('/studio/new')} style={createBtnStyle}>
             <Plus size={18} /> NEW WORKFLOW
           </button>
@@ -64,7 +71,7 @@ const Dashboard = () => {
 
       <div style={statsRowStyle}>
         <div style={statBox}><span>Total Flows</span> <strong>{workflows.length}</strong></div>
-        <div style={statBox}><span>Active Nodes</span> <strong style={{color: '#34D399'}}>{loading ? '...' : workflows.length}</strong></div>
+        <div style={statBox}><span>Live Now</span> <strong style={{color: '#34D399'}}>{loading ? '...' : workflows.length}</strong></div>
       </div>
 
       <div style={gridStyle}>
@@ -87,12 +94,17 @@ const Dashboard = () => {
           </div>
         ))}
       </div>
-      {workflows.length === 0 && !loading && <p style={{textAlign: 'center', color: '#64748B', marginTop: '50px'}}>No workflows found. Create your first one!</p>}
+      {workflows.length === 0 && !loading && (
+        <div style={{textAlign: 'center', marginTop: '50px'}}>
+           <p style={{color: '#64748B'}}>No workflows found in the cloud database.</p>
+           <button onClick={() => navigate('/studio/new')} style={{color: '#38BDF8', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline'}}>Create your first one</button>
+        </div>
+      )}
     </div>
   );
 };
 
-// --- Professional Dark UI Styles ---
+// --- Styles ---
 const containerStyle = { padding: '40px', background: '#061E29', minHeight: '100vh', color: 'white', fontFamily: 'Inter, sans-serif' };
 const headerStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
 const createBtnStyle = { background: '#0EA5E9', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' };

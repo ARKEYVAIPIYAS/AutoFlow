@@ -14,8 +14,17 @@ const app = express();
 app.use(cors()); 
 app.use(express.json());
 
+// --- PRODUCTION GUARDRAILS ---
+// Checks for critical environment variables to prevent runtime crashes
+const requiredEnv = ['MONGO_URI', 'GEMINI_KEY'];
+requiredEnv.forEach(key => {
+    if (!process.env[key]) {
+        console.warn(`\x1b[33m[Warning]\x1b[0m ${key} is missing in Environment Variables!`);
+    }
+});
+
 // --- CLOUD DATABASE CONNECTION ---
-// Prioritizes your Atlas link from .env; falls back to local for development
+// Prioritizes Atlas Cloud for production; local MongoDB for dev
 const dbURI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/aautoflow';
 
 mongoose.connect(dbURI)
@@ -102,7 +111,7 @@ async function runEngine(workflow, initialData, mode = "Manual") {
                 console.log(`\x1b[32m   └─ Gmail: Sent to ${recipient}\x1b[0m`);
             }
 
-            // 5. HTTP / WEBHOOK NODE (External Hardware/API Trigger)
+            // 5. HTTP / WEBHOOK NODE
             if (currentNode.data.label.includes('HTTP')) {
                 const targetUrl = currentNode.data.url;
                 if (targetUrl) {
@@ -127,6 +136,11 @@ async function runEngine(workflow, initialData, mode = "Manual") {
 }
 
 // --- API ROUTES ---
+
+// Health Check / Production Landing
+app.get('/', (req, res) => {
+    res.status(200).send("🚀 AutoFlow Cloud Engine is Online. Backend is ready for requests.");
+});
 
 // A. DASHBOARD: GET ALL WORKFLOWS
 app.get('/api/workflows', async (req, res) => {
@@ -227,7 +241,7 @@ app.delete('/api/workflows/:id', async (req, res) => {
   }
 });
 
-// F. WEBHOOKS (Bakery Order / Google Forms)
+// F. WEBHOOKS
 app.post('/api/forms/bakery-order', async (req, res) => {
     const { customerName, customerPhone, customerEmail, workflowId } = req.body;
     console.log(`\x1b[35m[WEBHOOK]\x1b[0m Received: ${customerName} | ${customerEmail}`);
