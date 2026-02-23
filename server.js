@@ -7,20 +7,21 @@ const twilio = require('twilio');
 const axios = require('axios');
 const cors = require('cors');
 const cron = require('node-cron');
-const helmet = require('helmet'); // New: Security headers
-const compression = require('compression'); // New: Data compression
+const helmet = require('helmet'); 
+const compression = require('compression'); 
 
 const Workflow = require('./models/Workflow');
 
 const app = express();
 
 // --- MIDDLEWARE ---
-app.use(helmet()); // Protects your API headers
-app.use(compression()); // Makes responses faster
+app.use(helmet()); 
+app.use(compression()); 
 app.use(cors()); 
 app.use(express.json());
 
 // --- PRODUCTION GUARDRAILS ---
+// Checks for critical environment variables
 const requiredEnv = ['MONGO_URI', 'GEMINI_KEY', 'GMAIL_USER', 'GMAIL_PASS'];
 requiredEnv.forEach(key => {
     if (!process.env[key]) {
@@ -29,14 +30,14 @@ requiredEnv.forEach(key => {
 });
 
 // --- CLOUD DATABASE CONNECTION ---
-const dbURI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/aautoflow';
+// Prioritizes your MongoDB Atlas link
+const dbURI = process.env.MONGO_URI;
 
 mongoose.connect(dbURI, { autoIndex: true })
     .then(() => {
-        const dbType = process.env.MONGO_URI ? "MongoDB Atlas (Cloud)" : "Local MongoDB";
-        console.log(`\x1b[32m[DB]\x1b[0m Connected to ${dbType} successfully`);
+        console.log(`\x1b[32m[DB]\x1b[0m Connected to MongoDB Atlas Cloud successfully`);
     })
-    .catch(err => console.error("\x1b[31m[DB Error]\x1b[0m Connection failed:", err));
+    .catch(err => console.error("\x1b[31m[DB Error]\x1b[0m Cloud connection failed:", err));
 
 // --- GLOBAL TRACKER FOR ACTIVE POLLING ---
 const activeTasks = {}; 
@@ -49,7 +50,6 @@ async function runEngine(workflow, initialData, mode = "Manual") {
     const modeColors = { "Polling": "\x1b[36m", "RunOnce": "\x1b[33m", "Trigger": "\x1b[35m" };
     const color = modeColors[mode] || "\x1b[37m";
     
-    // Enhanced Logging: Shows the specific target of the automation
     console.log(`${color}[${mode.toUpperCase()}] >> Executing: "${workflow.name}" for ${context.name || 'System'}\x1b[0m`);
 
     async function executeNode(nodeId) {
@@ -80,7 +80,7 @@ async function runEngine(workflow, initialData, mode = "Manual") {
                 
                 const response = await axios.post(apiURL, {
                     contents: [{ parts: [{ text: prompt }] }]
-                }, { timeout: 15000 }); // 15s timeout for AI response
+                }, { timeout: 15000 });
                 
                 context.aiResponse = response.data.candidates[0].content.parts[0].text;
                 console.log("\x1b[32m      └─ AI: Generation Successful\x1b[0m");
@@ -200,7 +200,6 @@ app.post('/api/workflows/:id/activate', async (req, res) => {
 
         if (activeTasks[id]) activeTasks[id].stop();
 
-        // Standard 1-minute pulse check
         activeTasks[id] = cron.schedule('* * * * *', () => {
             runEngine(workflow, { name: "System Pulse" }, "Polling");
         });
@@ -244,10 +243,11 @@ app.post('/api/forms/bakery-order', async (req, res) => {
 });
 
 // --- SERVER STARTUP ---
-const PORT = process.env.PORT || 3000;
+// Render provides the PORT variable automatically
+const PORT = process.env.PORT || 10000;
 const server = app.listen(PORT, () => {
-    console.log(`\n\x1b[95m🚀 AutoFlow Engine v2.6 (Production Ready) Online\x1b[0m`);
-    console.log(`Endpoint: http://localhost:${PORT} | Cloud Status: Active\n`);
+    console.log(`\n\x1b[95m🚀 AutoFlow Engine v2.6 (Cloud) Online\x1b[0m`);
+    console.log(`Backend Active on Render | Cloud Database Persistence\n`);
 });
 
 // --- GRACEFUL SHUTDOWN LOGIC ---

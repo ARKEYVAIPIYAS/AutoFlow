@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Activity, Plus, Power, LayoutGrid, Trash2, RefreshCw, AlertCircle } from 'lucide-react';
 
 // --- CONFIGURATION ---
-// Centralized Cloud Endpoint
+// SUCCESSFULLY SWAPPED: This now points to your live Render engine
 const API_BASE_URL = "https://autoflow-caor.onrender.com/api";
 
 const Dashboard = () => {
@@ -13,7 +13,7 @@ const Dashboard = () => {
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
-  // 1. Fetch Workflows (Wrapped in useCallback for stability)
+  // 1. Fetch Workflows from Render
   const fetchWorkflows = useCallback(async (showSilence = false) => {
     if (!showSilence) setLoading(true);
     setError(null);
@@ -22,30 +22,30 @@ const Dashboard = () => {
       setWorkflows(res.data);
     } catch (err) {
       console.error("Cloud Fetch Error:", err);
-      setError("Unable to reach Cloud Engine. Check your connection.");
+      setError("Unable to reach Cloud Engine. Check your Render dashboard.");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // 2. Real-Time Sync (Polls the cloud every 30 seconds)
+  // 2. Real-Time Sync (Syncs with MongoDB Atlas every 30s)
   useEffect(() => {
     fetchWorkflows();
     const interval = setInterval(() => fetchWorkflows(true), 30000); 
     return () => clearInterval(interval);
   }, [fetchWorkflows]);
 
-  // 3. Stop Workflow (Deactivate)
+  // 3. Stop Workflow on Cloud
   const handleStop = async (id) => {
     try {
       await axios.post(`${API_BASE_URL}/workflows/${id}/deactivate`);
-      fetchWorkflows(true); // Silent refresh
+      fetchWorkflows(true); 
     } catch (err) {
       alert("Failed to halt cloud task.");
     }
   };
 
-  // 4. Delete Workflow
+  // 4. Delete Workflow from MongoDB Atlas
   const handleDelete = async (id) => {
     if (window.confirm("Permanent Action: Delete this workflow from the cloud?")) {
       try {
@@ -82,7 +82,6 @@ const Dashboard = () => {
         </div>
       </header>
 
-      {/* ERROR STATE */}
       {error && (
         <div style={errorBanner}>
           <AlertCircle size={18} /> {error}
@@ -135,7 +134,7 @@ const Dashboard = () => {
   );
 };
 
-// --- Professional SaaS UI Styles ---
+// --- Styles ---
 const containerStyle = { padding: '50px 80px', background: '#020617', minHeight: '100vh', color: 'white', fontFamily: 'Inter, sans-serif' };
 const headerStyle = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '50px' };
 const createBtnStyle = { background: '#0EA5E9', color: 'white', border: 'none', padding: '12px 24px', borderRadius: '10px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 14px 0 rgba(14, 165, 233, 0.39)' };
