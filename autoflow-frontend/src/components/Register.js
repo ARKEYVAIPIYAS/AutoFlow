@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import axios from 'axios';
 import { useNavigate, Link } from 'react-router-dom';
 
-const API_BASE_URL = "https://autoflow-caor.onrender.com/api";
+const API_BASE_URL = "https://autoflow-i36g.onrender.com/api";
 
 const Register = () => {
   const [email, setEmail] = useState('');
