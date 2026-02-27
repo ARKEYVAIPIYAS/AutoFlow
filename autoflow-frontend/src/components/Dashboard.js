@@ -5,7 +5,7 @@ import { Activity, Plus, Power, LayoutGrid, Trash2, RefreshCw, AlertCircle } fro
 
 // --- CONFIGURATION ---
 // SUCCESSFULLY SWAPPED: This now points to your live Render engine
-const API_BASE_URL = "https://autoflow-caor.onrender.com/api";
+const API_BASE_URL = "https://autoflow-i36g.onrender.com/api";
 
 const Dashboard = () => {
   const [workflows, setWorkflows] = useState([]);
