@@ -2,16 +2,19 @@ import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Dashboard from './components/Dashboard';
 import Studio from './components/Studio';
+import Login from './components/Login';
+import Register from './components/Register';
 
 const App = () => {
   return (
     <Router>
       <Routes>
-        {/* Door 1: The Landing Dashboard (Home) */}
-        <Route path="/" element={<Dashboard />} />
+        {/* public pages */}
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
 
-        {/* Door 2: The Specific Workflow Canvas */}
-        {/* The ":id" lets us open different projects like /studio/1 or /studio/2 */}
+        {/* protected area */}
+        <Route path="/" element={<Dashboard />} />
         <Route path="/studio/:id" element={<Studio />} />
       </Routes>
     </Router>

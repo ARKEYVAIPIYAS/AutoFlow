@@ -13,12 +13,18 @@ const Dashboard = () => {
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
+  // authentication helper
+  const token = localStorage.getItem('af_token');
+  if (!token) {
+    navigate('/login');
+  }
+
   // 1. Fetch Workflows from Render
   const fetchWorkflows = useCallback(async (showSilence = false) => {
     if (!showSilence) setLoading(true);
     setError(null);
     try {
-      const res = await axios.get(`${API_BASE_URL}/workflows`);
+      const res = await axios.get(`${API_BASE_URL}/workflows`, { headers: { Authorization: `Bearer ${token}` } });
       setWorkflows(res.data);
     } catch (err) {
       console.error("Cloud Fetch Error:", err);
@@ -38,7 +44,7 @@ const Dashboard = () => {
   // 3. Stop Workflow on Cloud
   const handleStop = async (id) => {
     try {
-      await axios.post(`${API_BASE_URL}/workflows/${id}/deactivate`);
+      await axios.post(`${API_BASE_URL}/workflows/${id}/deactivate`, null, { headers: { Authorization: `Bearer ${token}` } });
       fetchWorkflows(true); 
     } catch (err) {
       alert("Failed to halt cloud task.");
@@ -49,7 +55,7 @@ const Dashboard = () => {
   const handleDelete = async (id) => {
     if (window.confirm("Permanent Action: Delete this workflow from the cloud?")) {
       try {
-        await axios.delete(`${API_BASE_URL}/workflows/${id}`);
+        await axios.delete(`${API_BASE_URL}/workflows/${id}`, { headers: { Authorization: `Bearer ${token}` } });
         setWorkflows(prev => prev.filter(w => w._id !== id));
       } catch (err) {
         alert("Delete failed. Cloud resource may be busy.");

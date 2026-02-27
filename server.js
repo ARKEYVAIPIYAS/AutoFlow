@@ -9,10 +9,21 @@ const cors = require('cors');
 const cron = require('node-cron');
 const helmet = require('helmet'); 
 const compression = require('compression'); 
+const rateLimit = require('express-rate-limit');
 
 const Workflow = require('./models/Workflow');
+const authRoutes = require('./routes/auth');
+const { requireAuth } = require('./middleware/authMiddleware');
 
 const app = express();
+
+// apply rate limiter to all api routes
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60,
+  message: 'Too many requests, please try again later.'
+});
+app.use('/api/', apiLimiter);
 
 // --- MIDDLEWARE ---
 app.use(helmet()); 
@@ -140,6 +151,9 @@ async function runEngine(workflow, initialData, mode = "Manual") {
 
 // --- API ROUTES ---
 
+// mount authentication routes
+app.use('/api/auth', authRoutes);
+
 // Health Check / Production Landing
 app.get('/', (req, res) => {
     res.status(200).json({
@@ -150,9 +164,10 @@ app.get('/', (req, res) => {
     });
 });
 
-app.get('/api/workflows', async (req, res) => {
+app.get('/api/workflows', requireAuth, async (req, res) => {
     try {
-        const workflows = await Workflow.find().sort({ createdAt: -1 }).select('-__v');
+        // only return workflows belonging to the authenticated user
+        const workflows = await Workflow.find({ owner: req.user.id }).sort({ createdAt: -1 }).select('-__v');
         res.json(workflows);
     } catch (err) {
         res.status(500).json({ message: "Error fetching workflows" });
@@ -169,10 +184,10 @@ app.get('/api/workflows/:id', async (req, res) => {
     }
 });
 
-app.post('/api/workflows', async (req, res) => {
+app.post('/api/workflows', requireAuth, async (req, res) => {
     try {
         const { name, nodes, edges } = req.body;
-        const newWorkflow = new Workflow({ name, nodes, edges });
+        const newWorkflow = new Workflow({ name, nodes, edges, owner: req.user.id });
         await newWorkflow.save();
         console.log(`\x1b[35m[SAVE]\x1b[0m New Workflow: ${newWorkflow.name}`);
         res.status(201).json(newWorkflow);
@@ -181,10 +196,15 @@ app.post('/api/workflows', async (req, res) => {
     }
 });
 
-app.put('/api/workflows/:id', async (req, res) => {
+app.put('/api/workflows/:id', requireAuth, async (req, res) => {
     try {
         const { name, nodes, edges } = req.body;
-        const updated = await Workflow.findByIdAndUpdate(req.params.id, { name, nodes, edges }, { new: true });
+        const updated = await Workflow.findOneAndUpdate(
+            { _id: req.params.id, owner: req.user.id },
+            { name, nodes, edges },
+            { new: true }
+        );
+        if (!updated) return res.status(404).json({ message: 'Workflow not found' });
         console.log(`\x1b[34m[UPDATE]\x1b[0m Modified: ${req.params.id}`);
         res.json(updated);
     } catch (err) {
@@ -192,10 +212,10 @@ app.put('/api/workflows/:id', async (req, res) => {
     }
 });
 
-app.post('/api/workflows/:id/activate', async (req, res) => {
+app.post('/api/workflows/:id/activate', requireAuth, async (req, res) => {
     try {
         const { id } = req.params;
-        const workflow = await Workflow.findById(id);
+        const workflow = await Workflow.findOne({ _id: id, owner: req.user.id });
         if (!workflow) return res.status(404).send("Workflow not found");
 
         if (activeTasks[id]) activeTasks[id].stop();
@@ -209,7 +229,7 @@ app.post('/api/workflows/:id/activate', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/workflows/:id/deactivate', async (req, res) => {
+app.post('/api/workflows/:id/deactivate', requireAuth, async (req, res) => {
     const { id } = req.params;
     if (activeTasks[id]) {
         activeTasks[id].stop();
@@ -220,9 +240,10 @@ app.post('/api/workflows/:id/deactivate', async (req, res) => {
     res.status(400).send("No active task found");
 });
 
-app.delete('/api/workflows/:id', async (req, res) => {
+app.delete('/api/workflows/:id', requireAuth, async (req, res) => {
     try {
-        await Workflow.findByIdAndDelete(req.params.id);
+        const deleted = await Workflow.findOneAndDelete({ _id: req.params.id, owner: req.user.id });
+        if (!deleted) return res.status(404).json({ message: "Workflow not found" });
         res.json({ message: "Workflow deleted" });
     } catch (err) {
         res.status(500).json({ error: "Failed to delete" });
@@ -240,6 +261,12 @@ app.post('/api/forms/bakery-order', async (req, res) => {
     } catch (err) {
         if (!res.headersSent) res.status(500).json({ error: err.message });
     }
+});
+
+// generic error handler
+app.use((err, req, res, next) => {
+    console.error('[Unhandled Error]', err);
+    res.status(500).json({ message: 'Internal Server Error' });
 });
 
 // --- SERVER STARTUP ---
