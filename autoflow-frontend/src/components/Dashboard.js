@@ -32,7 +32,7 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [token]);
 
   // 2. Real-Time Sync (Syncs with MongoDB Atlas every 30s)
   useEffect(() => {
